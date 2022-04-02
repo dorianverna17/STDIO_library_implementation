@@ -18,6 +18,10 @@ struct _so_file
 	int mode;
 	int buffer_position;
 	int cursor;
+	int curr_buff_size;
+
+	// 0 for read, 1 for write;
+	int read_write;
 
 	char *pathname;
 };
@@ -37,9 +41,9 @@ SO_FILE *so_fopen(const char *pathname, const char *mode)
 	} else if (strcmp(mode, "w+") == 0) {
 		mode_flags = O_RDWR | O_CREAT | O_TRUNC;
 	} else if (strcmp(mode, "a") == 0) {
-		mode_flags = O_APPEND | O_CREAT;
+		mode_flags = O_APPEND | O_WRONLY | O_CREAT;
 	} else if (strcmp(mode, "a+") == 0) {
-		mode_flags = O_APPEND | O_RDONLY | O_CREAT;
+		mode_flags = O_APPEND | O_RDWR | O_CREAT;
 	} else {
 		free(file);
 		return NULL;
@@ -59,13 +63,19 @@ SO_FILE *so_fopen(const char *pathname, const char *mode)
 	file->pathname[strlen(pathname)] = '\0';
 	file->buffer_position = 0;
 	file->cursor = 0;
+	file->curr_buff_size = 0;
+	file->read_write = -1;
 
 	return file;
 }
 
 int so_fclose(SO_FILE *stream)
 {
-	int res = close(stream->fd);
+	int res;
+
+	so_fflush(stream);
+
+	res = close(stream->fd);
 
 	if (res == -1)
 		return SO_EOF;
@@ -83,17 +93,45 @@ int so_fileno(SO_FILE *stream)
 
 int so_fflush(SO_FILE *stream)
 {
+	int res;
+	int stream_size = stream->buffer_position;
+	int current_cursor = 0;
+
+	while (stream_size > 0) {
+		res = write(stream->fd, stream->buffer + current_cursor, stream_size);
+
+		if (res == -1)
+			return SO_EOF;
+
+		current_cursor += res;
+		stream_size -= res;
+	}
+
+	stream->buffer_position = 0;
+	stream->curr_buff_size = 0;
+
 	return 0;
 }
 
 int so_fseek(SO_FILE *stream, long offset, int whence)
 {
+	int res;
+
+	if (whence == SEEK_SET || whence == SEEK_CUR || whence == SEEK_END)
+		res = lseek(stream->fd, offset, whence);
+	else
+		return -1;
+
+	if (res == -1)
+		return -1;
+	stream->cursor = res;
+
 	return 0;
 }
 
 long so_ftell(SO_FILE *stream)
 {
-	return 0;
+	return stream->cursor;
 }
 
 size_t so_fread(void *ptr, size_t size, size_t nmemb, SO_FILE *stream)
@@ -102,62 +140,83 @@ size_t so_fread(void *ptr, size_t size, size_t nmemb, SO_FILE *stream)
 	int cursor_ptr = 0;
 	int bytes_to_be_copied;
 	int count;
+	int bytes_unread_buffer;
+
+	if (stream->read_write == 1) {
+		stream->buffer_position = 0;
+		stream->curr_buff_size = 0;
+	}
+	stream->read_write = 0;
 
 	// total bytes that need to be returned
 	bytes_to_read = size * nmemb;
 
-	if (stream->cursor == 0) {
-		count = read(stream->fd, stream->buffer, BUF_SIZE);
+	while (bytes_to_read > 0) {
+		bytes_unread_buffer = stream->curr_buff_size - stream->buffer_position;
 
-		if (count == -1)
-			return SO_EOF;
-
-		if (count == 0)
-			return 0;
-
-		stream->buffer_position = 0;
-		stream->cursor += BUF_SIZE;
-	}
-
-	// if the buffer does not contain the needed number of bytes
-	// then we need to read from file some more
-	while ((BUF_SIZE - stream->buffer_position < bytes_to_read)) {
-		// copy the available bytes to target ptr
-		bytes_to_be_copied = BUF_SIZE - stream->buffer_position;
-		if (bytes_to_be_copied > bytes_to_read) {
-			memcpy(ptr + cursor_ptr, stream->buffer, bytes_to_read);
-			return size * nmemb;
+		if (bytes_unread_buffer > bytes_to_read) {
+			memcpy(ptr + cursor_ptr, stream->buffer + stream->buffer_position, bytes_to_read);
+			stream->buffer_position += bytes_to_read;
+			bytes_to_read = 0;
+			cursor_ptr += bytes_to_read;
+		} else {
+			memcpy(ptr + cursor_ptr, stream->buffer + stream->buffer_position, bytes_unread_buffer);
+			stream->buffer_position += bytes_unread_buffer;
+			bytes_to_read -= bytes_unread_buffer;
+			cursor_ptr += bytes_unread_buffer;
 		}
-		memcpy(ptr + cursor_ptr, stream->buffer, bytes_to_be_copied);
-		cursor_ptr += bytes_to_be_copied;
-		bytes_to_read -= bytes_to_be_copied;
 
-		// read bytes from file
-		count = read(stream->fd, stream->buffer, BUF_SIZE);
+		if ((bytes_to_read > 0) && (stream->curr_buff_size == stream->buffer_position)) {
+			count = read(stream->fd, stream->buffer, BUF_SIZE);
+			if (count < 0)
+				return SO_EOF;
 
-		if (count == -1)
-			return SO_EOF;
+			if (count == 0)
+				return nmemb;
 
-		if (count < BUF_SIZE) {
-			if (bytes_to_read < count)
-				memcpy(ptr + cursor_ptr, stream->buffer, bytes_to_read);
+			stream->buffer_position = 0;
+			if (bytes_to_read > count)
+				stream->cursor += count;
 			else
-				memcpy(ptr + cursor_ptr, stream->buffer, count);
-			return size * nmemb;
+				stream->cursor += bytes_to_read;
+			stream->curr_buff_size = count;
 		}
-		// reset the position and update cursor
-		stream->buffer_position = 0;
-		stream->cursor += BUF_SIZE;
 	}
-	memcpy(ptr + cursor_ptr, stream->buffer, bytes_to_read);
-	stream->buffer_position += bytes_to_read;
-
-	return size * nmemb;
+	return nmemb;
 }
 
 size_t so_fwrite(const void *ptr, size_t size, size_t nmemb, SO_FILE *stream)
 {
-	return 0;
+	int bytes_free;
+	int bytes_to_write = size * nmemb;
+	int ptr_cursor = 0;
+
+	if (stream->read_write == 0) {
+		stream->buffer_position = 0;
+		stream->curr_buff_size = 0;
+	}
+	stream->read_write = 1;
+
+	while (bytes_to_write > 0) {
+		if (BUF_SIZE - stream->buffer_position <= 0)
+			return SO_EOF;
+
+		bytes_free = BUF_SIZE - stream->buffer_position;
+
+		if (bytes_free > bytes_to_write) {
+			memcpy(stream->buffer + stream->buffer_position, ptr + ptr_cursor, bytes_to_write);
+			stream->buffer_position += bytes_to_write;
+			ptr_cursor += bytes_to_write;
+			bytes_to_write = 0;
+		} else {
+			memcpy(stream->buffer + stream->buffer_position, ptr + ptr_cursor, bytes_free);
+			stream->buffer_position += bytes_free;
+			ptr_cursor += bytes_free;
+			bytes_to_write -= bytes_free;
+			so_fflush(stream);
+		}
+	}
+	return nmemb;
 }
 
 int so_fgetc(SO_FILE *stream)
@@ -179,7 +238,16 @@ int so_fgetc(SO_FILE *stream)
 
 int so_fputc(int c, SO_FILE *stream)
 {
-	return 0;
+	int res;
+
+	memcpy(stream->buffer + stream->buffer_position, (char *) &c, 1);
+
+	stream->buffer_position++;
+
+	if (stream->buffer_position == BUF_SIZE)
+		so_fflush(stream);
+
+	return c;
 }
 
 int so_feof(SO_FILE *stream)
@@ -198,11 +266,6 @@ SO_FILE *so_popen(const char *command, const char *type)
 }
 
 int so_pclose(SO_FILE *stream)
-{
-	return 0;
-}
-
-int main(void)
 {
 	return 0;
 }
