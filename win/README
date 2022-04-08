@@ -1,0 +1,77 @@
+Verna Dorian-Alexandru
+334CC
+Tema2 SO
+
+Dificultate: mediu
+Timp de lucru: 15 ore
+
+Initial am facut tema pe Linux (acolo o am toata) si vineri,
+a doua zi dupa deadline m-am pus sa o fac si aici, pe windows
+pentru ca am vazut pe forum ca se scade din tema e windows daca
+incarc dupa deadline si punctajul pe linux ramane cat era inainte
+de deadline. Acest README este la fel ca cel de pe linux. Singura
+diferenta fata de linux este ca am schimbat functiile de read, write,
+lseek, open, close cu cele din windows si le-am folosit parametrii
+buni. Aici am avut putin de furca cu flag-urile la fopen, dar mi-a
+iesit intr-un final. Nu am mai facut partea de procese si nici coding
+style-ul.
+Mai jos este README-ul pe care il am si pe linux:
+
+// Organizare
+Ca abordare generala:
+-> am pornit de la fisierul so_stdio.h si am preluat numele structurii
+si antetele functiilor de acolo, apoi am facut sa imi treaca pe rand
+fiecare test. Structura am completat-o pe masura ce mi-am dat seama de
+ce campuri am nevoie in aceasta.
+Am creat fisierul so_stdio.c in care am facut implementarile.
+Cu ajutorul Makefile-ului generez biblioteca libso_stdio.so.
+-> Consider ca tema a fost utila. Am inteles mai bine modul de lucru
+cu fisierele si cu procesele.
+-> Unele functii consider ca le-am implementat destul de eficient, cum
+ar fi so_fread sau so_fwrite. Pe de alta parte, mi-am dat seama ca
+implementarea mea la feof este destul de naiva pentru ca preiau nr de
+octeti fata de inceput unde e cursorul actual si il compar cu sfarsitul.
+Ca sa imi dau seama de sfarsit ma deplasez cu lseek pana acolo si dupa
+ma repozitionez unde eram inainte. Mi-am dat seama ca puteam sa am un
+flag in structura care sa imi returneze asta direct dar facusem deja
+toata implementarea si nu am mai schimbat asta. Cam asta ar fi partea
+naiva a implementarii din punctul meu de vedere
+
+Corner cases:
+-> Nu sunt sigur exact ce ar trebui sa zic aici dar o sa povestesc despre
+o eroare pe care am avut-o atunci cand am inceput sa fac procesele.
+Nu imi dadeam seama ce greseam la popen, nu imi treceau testele acelea cu
+procesele. Dupa mai mult timp de debugging mi-am dat seama ca problema era
+la feof si primul test legat de popen_read se termina tot timpul cu seg fault
+pentru ca nu imi iesea din while acolo. Aici mi-am dat seama si de
+implementarea mea naiva de la feof. Problema era ca feof-ul meu returna
+eroare tot timpul in cazul de la procese pentru ca acolo lucram cu stdin si
+stdout si lseek nu mergea. Mi-a luat ceva pana sa ma prind ca ar trebui sa
+pun un flag in structura care sa imi zica cand copilul nu mai citeste
+(child_at_end) ca sa fac sa mearga.
+
+// Implementare
+Am implementat intregul enunt al temei, toata pe linux si o parte pe windows
+Nu exista functionalitati extra
+Nu cred ca am functionalitati lipsa, not that I know of
+Dificulatea principala ar fi cea prezentata mai sus la Corner cases, dar
+am avut putin de furca si cu setup-ul pt tema, de exp Makefile-urile
+Am descoperit cam cum lucreaza procesele pentru ca la laborator nu prea am
+inteles. Cu ocazia temei a trebuit sa refac si laboratorul de procese:))
+
+// Cum se compileaza
+Makefile-urile sunt destul de simple, am incercat sa pun efectiv comenzile ca
+si cum le-as da din linia de comanda (am incercat sa nu ma complic). Am regula
+de build si de clean
+
+// Bibliografie
+https://ocw.cs.pub.ro/courses/so/teme/general
+https://ocw.cs.pub.ro/courses/so/laboratoare/laborator-02
+https://ocw.cs.pub.ro/courses/so/laboratoare/laborator-03
+
+Am pus si comentarii in cod, sper ca e ok.
+Tema a fost ok, eu am un feedback pozitiv
+Keep up the good work!
+
+Verna Dorian-Alexandru
+334CC
